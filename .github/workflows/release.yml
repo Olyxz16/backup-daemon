@@ -1,0 +1,73 @@
+name: Build and Release Windows Backup Assistant
+
+on:
+  push:
+    tags:
+      - 'v*' # Se déclenche quand on pousse un tag comme v1.0.0, v0.1.5, etc.
+
+permissions:
+  contents: write # Nécessaire pour créer la release
+
+jobs:
+  build-and-package:
+    name: Build Windows Binary
+    runs-on: windows-latest # Utilisation d'un runner Windows pour CGO facile
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21' # Ou ta version de Go
+          cache: true
+
+      # Le runner Windows de GitHub a déjà MinGW (gcc) installé, 
+      # donc CGO devrait fonctionner directement.
+
+      - name: Build Binary
+        shell: pwsh
+        # -H=windowsgui : cache la console
+        # -s -w : réduit la taille du binaire en enlevant les infos de debug
+        run: |
+          go build -ldflags "-H=windowsgui -s -w" -o backup-daemon.exe main.go
+
+      - name: Verify Files Exist
+        shell: pwsh
+        run: |
+          if (!(Test-Path "backup-daemon.exe")) { throw "Exe missing!" }
+          if (!(Test-Path "icon.ico")) { throw "Icon missing! Make sure icon.ico is in root." }
+
+      - name: Create README for user
+        shell: pwsh
+        run: |
+          $readmeContent = @"
+          === Assistant de Sauvegarde Doctorat ===
+
+          INSTALLATION :
+          1. Créez un dossier où vous voulez (ex: C:\BackupTools).
+          2. Copiez les DEUX fichiers dans ce dossier :
+             - BackupAssistant.exe
+             - icon.ico
+          3. Pour lancer automatiquement au démarrage :
+             - Faites Touche Windows + R.
+             - Tapez : shell:startup
+             - Créez un raccourci de BackupAssistant.exe dans le dossier qui s'ouvre.
+
+          UTILISATION :
+          Une icône apparaît près de l'heure (en bas à droite).
+          Clic-droit pour voir le statut ou forcer une sauvegarde.
+          "@
+          Set-Content -Path README.txt -Value $readmeContent
+
+      - name: Create Zip Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path backup-daemon.exe, icon.ico, README.txt -DestinationPath BackupAssistant_Windows.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BackupAssistant_Windows.zip
+          generate_release_notes: true # Génère une description basée sur les commits
