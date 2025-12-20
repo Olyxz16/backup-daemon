@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -240,6 +241,10 @@ func performBackup() bool {
 	args := []string{"-r", appConfig.Repository, "backup", appConfig.SourcePath}
 
 	cmd := exec.Command("restic", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+		CreationFlags: 0x08000000,
+	}
 	cmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+appConfig.ResticPassword)
 	
 	output, err := cmd.CombinedOutput()
