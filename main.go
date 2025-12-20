@@ -240,16 +240,18 @@ func performBackup() bool {
 	// 1. Préparation des arguments de base
 	args := []string{"-r", appConfig.Repository}
 
-	// 2. GESTION SSH AVANCÉE
-	// Si une clé SSH est spécifiée dans la config, on force Restic à utiliser une commande SSH spécifique
-	if appConfig.SSHKeyPath != "" {
-		cleanKeyPath := filepath.ToSlash(appConfig.SSHKeyPath)
-		// On force la clé ET les options de sécurité
-		sshCmd := fmt.Sprintf("ssh -i \"%s\" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -s sftp", cleanKeyPath)
-		args = append(args, "-o", "sftp.command="+sshCmd)
+	sshOptions := "-o BatchMode=yes -o StrictHostKeyChecking=accept-new"
 	
+	if appConfig.SSHKeyPath != "" {
+		// Cas avec clé spécifique
+		cleanKeyPath := filepath.ToSlash(appConfig.SSHKeyPath)
+		// On construit : ssh -i "C:/..." -o ...
+		sshCmd := fmt.Sprintf("ssh -i \"%s\" %s", cleanKeyPath, sshOptions)
+		args = append(args, "-o", "sftp.command="+sshCmd)
 	} else {
-		sshCmd := "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -s sftp"
+		// Cas clé par défaut
+		// On construit : ssh -o ...
+		sshCmd := fmt.Sprintf("ssh %s", sshOptions)
 		args = append(args, "-o", "sftp.command="+sshCmd)
 	}
 
