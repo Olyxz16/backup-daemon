@@ -237,33 +237,11 @@ func runBackupSafe(statusItem *systray.MenuItem) {
 func performBackup() bool {
 	log.Println("Exécution de Restic...")
 
-	// 1. Préparation des arguments de base
-	args := []string{"-r", appConfig.Repository}
-
-	sshOptions := "-o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-	
-	if appConfig.SSHKeyPath != "" {
-		// Cas avec clé spécifique
-		cleanKeyPath := filepath.ToSlash(appConfig.SSHKeyPath)
-		// On construit : ssh -i "C:/..." -o ...
-		sshCmd := fmt.Sprintf("ssh -i \"%s\" %s", cleanKeyPath, sshOptions)
-		args = append(args, "-o", "sftp.command="+sshCmd)
-	} else {
-		// Cas clé par défaut
-		// On construit : ssh -o ...
-		sshCmd := fmt.Sprintf("ssh %s", sshOptions)
-		args = append(args, "-o", "sftp.command="+sshCmd)
-	}
-
-	// Suite des arguments
-	args = append(args, "backup", appConfig.SourcePath)
+	args := []string{"-r", appConfig.Repository, "backup", appConfig.SourcePath}
 
 	cmd := exec.Command("restic", args...)
-
-	// Injection du mot de passe
 	cmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+appConfig.ResticPassword)
 	
-	// Capture output (identique à avant)
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
 	success := err == nil
