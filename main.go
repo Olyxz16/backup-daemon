@@ -14,192 +14,294 @@ import (
 	"github.com/getlantern/systray"
 	"github.com/robfig/cron/v3"
 	"gopkg.in/toast.v1"
+	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 )
 
-// --- CONFIGURATION ---
-const (
-	ResticExe   = `C:\ProgramData\chocolatey\bin\restic.exe`
-	RepoPath    = `B:\MonBackup`
-	Password    = "mon_mot_de_passe_secret"
-	SourcePath  = `C:\Users\Doctorant\Documents\These`
-	BackupHour  = 9
-	BackupMin   = 0
-	LogFile     = "backup_service.log"
-	DbFile      = "backup_history.db"
-	IconFile    = "icon.ico" // IMPORTANT : Il faut un fichier .ico à côté de l'exe
-)
+// --- STRUCTURE DE CONFIGURATION YAML ---
+type Config struct {
+	ResticPassword string `yaml:"restic_password"`
+	SourcePath     string `yaml:"source_path"`
+	CronSchedule   string `yaml:"cron_schedule"` // Ex: "0 9 * * *"
+}
 
+// --- VARIABLES GLOBALES ---
 var (
 	db          *sql.DB
-	backupMutex sync.Mutex // Pour éviter 2 backups en même temps
+	backupMutex sync.Mutex
 	isRunning   bool
+	appConfig   Config
+	paths       struct {
+		appDir  string
+		logFile string
+		dbFile  string
+		configFile string
+	}
 )
 
-func main() {
-	// 1. Init Logs
-	f, err := os.OpenFile(LogFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("Erreur log: %v", err)
-	}
-	defer f.Close()
-	log.SetOutput(f)
+const IconFilename = "icon.ico"
 
-	// 2. On lance le systray (Ceci bloque le main thread, c'est normal)
+// --- INITIALISATION (Avant l'interface graphique) ---
+func init() {
+	// 1. Définir les chemins standards Windows (%AppData%/Roaming)
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		log.Fatal("Impossible de trouver le dossier de configuration utilisateur:", err)
+	}
+	paths.appDir = filepath.Join(configDir, "ResticBackupAssistant")
+	paths.logFile = filepath.Join(paths.appDir, "backup.log")
+	paths.dbFile = filepath.Join(paths.appDir, "history.db")
+	paths.configFile = filepath.Join(paths.appDir, "config.yaml")
+
+	// Créer le dossier si inexistant
+	if _, err := os.Stat(paths.appDir); os.IsNotExist(err) {
+		os.MkdirAll(paths.appDir, 0755)
+	}
+
+	// 2. Initialisation Logs vers fichier standard
+	f, err := os.OpenFile(paths.logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		// Si on ne peut pas logger dans le fichier, on panic sur la sortie standard
+		panic(fmt.Sprintf("Erreur fatale log: %v", err))
+	}
+	log.SetOutput(f)
+	log.Println("========== Démarrage de l'agent ==========")
+	log.Printf("Dossier de données: %s\n", paths.appDir)
+
+	// 3. Vérifier la présence de Restic dans le PATH
+	if _, err := exec.LookPath("restic"); err != nil {
+		errMsg := "ERREUR CRITIQUE: 'restic' n'est pas trouvé dans le PATH système. Veuillez installer Restic."
+		log.Println(errMsg)
+		sendNotification(false, "Restic introuvable !", "L'exécutable restic est absent du PATH.")
+		os.Exit(1) // On quitte si restic n'est pas là
+	}
+}
+
+func main() {
+	// On lance le systray. C'est lui qui gère la boucle principale.
 	systray.Run(onReady, onExit)
 }
 
 func onReady() {
-	log.Println("--- Démarrage de l'agent Backup (Tray) ---")
-	
-	// Charger l'icône
-	iconData, err := ioutil.ReadFile(IconFile)
+	// Tenter de charger l'icône (doit être à côté de l'exécutable)
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	iconData, err := ioutil.ReadFile(filepath.Join(exeDir, IconFilename))
 	if err == nil {
 		systray.SetIcon(iconData)
 	} else {
-		log.Println("Attention: icon.ico non trouvé, l'application sera invisible dans le tray sans icône par défaut du système.")
-		systray.SetTitle("Backup") // Fallback
+		log.Println("Info: icon.ico non trouvée à côté de l'exe.")
+		systray.SetTitle("Backup")
 	}
 
 	systray.SetTooltip("Assistant de Backup Doctorat")
 
-	// --- MENU ---
-	mStatus := systray.AddMenuItem("Prêt", "Statut actuel")
-	mStatus.Disable() // Juste informatif
+	mStatus := systray.AddMenuItem("Initialisation...", "Statut")
+	mStatus.Disable()
 	systray.AddSeparator()
-	mBackupNow := systray.AddMenuItem("Sauvegarder maintenant", "Forcer une sauvegarde immédiate")
+	mBackupNow := systray.AddMenuItem("Sauvegarder maintenant", "Forcer")
+	mOpenLogs := systray.AddMenuItem("Ouvrir les logs", "Voir le fichier log")
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quitter", "Arrêter le programme")
+	mQuit := systray.AddMenuItem("Quitter", "Arrêter")
 
-	// --- INITIALISATION LOGIQUE (Dans une Goroutine séparée) ---
+	// --- Goroutine de Logique Principale ---
 	go func() {
-		initDB()
-		defer db.Close()
+		// 4. Charger la configuration YAML
+		if err := loadConfig(); err != nil {
+			log.Printf("Erreur config: %v", err)
+			mStatus.SetTitle("Erreur Configuration (voir logs)")
+			sendNotification(false, "Erreur Config", "Impossible de lire config.yaml. Vérifiez les logs.")
+			return // On arrête la logique mais on laisse le tray pour accès aux logs
+		}
 
-		// Cron
+		// 5. Init DB
+		initDB()
+
+		// 6. Setup Cron
 		c := cron.New()
-		cronExp := fmt.Sprintf("%d %d * * *", BackupMin, BackupHour)
-		c.AddFunc(cronExp, func() {
-			log.Println("Déclenchement automatique Cron")
+		_, err := c.AddFunc(appConfig.CronSchedule, func() {
+			log.Println(">>> Déclenchement Cron automatique")
 			runBackupSafe(mStatus)
 		})
-		c.Start()
-
-		// Catch-up (Vérification au démarrage)
-		checkAndRunMissedBackup(mStatus)
-	}()
-
-	// --- GESTION DES CLICS MENU ---
-	go func() {
-		for {
-			select {
-			case <-mBackupNow.ClickedCh:
-				log.Println("Déclenchement manuel par l'utilisateur")
-				go runBackupSafe(mStatus) // On lance dans une routine pour ne pas geler le menu
-			case <-mQuit.ClickedCh:
-				systray.Quit()
-				return
-			}
+		if err != nil {
+			log.Printf("Erreur format Cron '%s': %v", appConfig.CronSchedule, err)
+			mStatus.SetTitle("Erreur Cron (voir logs)")
+			sendNotification(false, "Erreur Cron", "Le format de l'heure dans le config.yaml est invalide.")
+			return
 		}
+		c.Start()
+		log.Printf("Planificateur démarré avec la règle: [%s]", appConfig.CronSchedule)
+
+		mStatus.SetTitle("Prêt - En attente")
+
+		// 7. Catch-up (Rattrapage au démarrage)
+		// Si aucune backup réussie aujourd'hui, on lance.
+		checkAndRunCatchUp(mStatus)
 	}()
+
+	// --- Gestion des évènements Menu ---
+	for {
+		select {
+		case <-mBackupNow.ClickedCh:
+			log.Println(">>> Déclenchement manuel utilisateur")
+			go runBackupSafe(mStatus)
+		case <-mOpenLogs.ClickedCh:
+			// Ouvre le fichier de log avec l'éditeur par défaut (notepad)
+			exec.Command("cmd", "/c", "start", "", paths.logFile).Start()
+		case <-mQuit.ClickedCh:
+			systray.Quit()
+			return
+		}
+	}
 }
 
 func onExit() {
+	if db != nil {
+		db.Close()
+	}
 	log.Println("Arrêt de l'application.")
 }
 
-// Wrapper thread-safe pour la backup
+// --- FONCTIONS UTILITAIRES ---
+
+func loadConfig() error {
+	// Vérifier si le fichier existe
+	if _, err := os.Stat(paths.configFile); os.IsNotExist(err) {
+		// Créer un template si inexistant pour aider l'utilisateur
+		template := `restic_password: "CHANGE_MOI_VITE"
+source_path: "C:\\Users\\Doctorant\\Documents\\These"
+cron_schedule: "0 9 * * *" # Format Cron: Minute Heure Jour Mois Semaine (ex: 9h00 tous les jours)
+`
+		ioutil.WriteFile(paths.configFile, []byte(template), 0644)
+		return fmt.Errorf("fichier %s inexistant. Un modèle a été créé. Veuillez le configurer", paths.configFile)
+	}
+
+	data, err := ioutil.ReadFile(paths.configFile)
+	if err != nil {
+		return fmt.Errorf("lecture fichier: %w", err)
+	}
+
+	err = yaml.Unmarshal(data, &appConfig)
+	if err != nil {
+		return fmt.Errorf("parsing YAML: %w", err)
+	}
+
+	// Validation basique
+	if appConfig.ResticPassword == "" || appConfig.SourcePath == "" {
+		return fmt.Errorf("restic_password ou source_path vide dans la config")
+	}
+	if appConfig.ResticPassword == "CHANGE_MOI_VITE" {
+		return fmt.Errorf("le mot de passe par défaut n'a pas été changé dans config.yaml")
+	}
+
+	return nil
+}
+
+func initDB() {
+	var err error
+	db, err = sql.Open("sqlite", paths.dbFile)
+	if err != nil {
+		log.Fatalf("Erreur fatale DB: %v", err)
+	}
+	query := `CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME, success BOOLEAN, output TEXT);`
+	if _, err := db.Exec(query); err != nil {
+		log.Fatalf("Erreur init table DB: %v", err)
+	}
+}
+
 func runBackupSafe(statusItem *systray.MenuItem) {
-	// On verrouille pour s'assurer qu'une seule backup tourne à la fois
 	backupMutex.Lock()
 	if isRunning {
 		backupMutex.Unlock()
-		log.Println("Backup demandée mais une est déjà en cours. Ignoré.")
+		log.Println("Backup ignorée car une autre est déjà en cours.")
+		sendNotification(false, "Backup ignorée", "Une sauvegarde est déjà en cours d'exécution.")
 		return
 	}
 	isRunning = true
 	statusItem.SetTitle("Backup en cours...")
 	backupMutex.Unlock()
 
-	// Exécution
-	performBackup()
+	success := performBackup()
 
-	// Fin
 	backupMutex.Lock()
 	isRunning = false
-	statusItem.SetTitle("Prêt (Dernière: " + time.Now().Format("15:04") + ")")
+	statusMsg := "Echec dernière backup"
+	if success {
+		statusMsg = "Prêt (Succès: " + time.Now().Format("15:04") + ")"
+	}
+	statusItem.SetTitle(statusMsg)
 	backupMutex.Unlock()
 }
 
-// ... (Le reste des fonctions initDB, checkAndRunMissedBackup sont identiques à avant, sauf l'appel à performBackup) ...
-
-func initDB() {
-	var err error
-	db, err = sql.Open("sqlite", DbFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	query := `CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME, success BOOLEAN, output TEXT);`
-	db.Exec(query)
-}
-
-func checkAndRunMissedBackup(statusItem *systray.MenuItem) {
-	now := time.Now()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	scheduledTime := time.Date(now.Year(), now.Month(), now.Day(), BackupHour, BackupMin, 0, 0, now.Location())
-
-	if now.Before(scheduledTime) {
-		return
-	}
-
-	var count int
-	db.QueryRow("SELECT COUNT(*) FROM history WHERE success = 1 AND timestamp >= ?", startOfDay).Scan(&count)
-
-	if count == 0 {
-		log.Println("Rattrapage nécessaire...")
-		runBackupSafe(statusItem)
-	}
-}
-
-func performBackup() {
-	log.Println("Exécution Restic...")
-	cmd := exec.Command(ResticExe, "-r", RepoPath, "backup", SourcePath)
-	cmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+Password)
+func performBackup() bool {
+	log.Println("Exécution de Restic...")
+	// On utilise "restic" directement, en supposant qu'il est dans le PATH
+	cmd := exec.Command("restic", "backup", appConfig.SourcePath)
 	
-	// Optionnel: Pour éviter la fenêtre console popup lors de l'appel exec (si compilé sans -H=windowsgui c'est utile, mais avec c'est mieux)
-	// cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} 
+	// Injection du mot de passe depuis la config
+	cmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+appConfig.ResticPassword)
+	// Important pour Windows: cacher la fenêtre console du sous-processus
+	// cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
 	success := err == nil
 
 	if success {
-		log.Println("Succès.")
+		log.Println("--- Sauvegarde Restic TERMINÉE AVEC SUCCÈS ---")
+		sendNotification(true, "Sauvegarde Réussie", "Vos données sont en sécurité.")
 	} else {
-		log.Printf("Echec: %v", err)
+		log.Printf("--- ECHEC SAUVEGARDE RESTIC --- Erreur: %v\nOutput:\n%s", err, outputStr)
+		sendNotification(false, "ECHEC SAUVEGARDE", "Une erreur est survenue. Cliquez pour voir les logs.")
 	}
 
-	db.Exec("INSERT INTO history (timestamp, success, output) VALUES (?, ?, ?)", time.Now(), success, outputStr)
-	sendNotification(success)
+	if db != nil {
+		_, dbErr := db.Exec("INSERT INTO history (timestamp, success, output) VALUES (?, ?, ?)", time.Now(), success, outputStr)
+		if dbErr != nil {
+			log.Printf("Erreur écriture DB historique: %v", dbErr)
+		}
+	}
+	return success
 }
 
-func sendNotification(success bool) {
-	title := "Sauvegarde Terminée"
-	message := "Tout est OK."
-	if !success {
-		title = "ERREUR SAUVEGARDE"
-		message = "Cliquez pour voir les logs."
+// Logique de rattrapage simplifiée : A-t-on sauvegardé AUJOURD'HUI ?
+func checkAndRunCatchUp(statusItem *systray.MenuItem) {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM history WHERE success = 1 AND timestamp >= ?", startOfDay).Scan(&count)
+	if err != nil {
+		log.Printf("Erreur vérification DB pour rattrapage: %v", err)
+		return
 	}
-	
-	// On récupère le chemin absolu du log pour l'ouvrir
-	absLog, _ := filepath.Abs(LogFile)
+
+	if count == 0 {
+		log.Println("Aucune sauvegarde réussie détectée aujourd'hui. Lancement du rattrapage au démarrage...")
+		runBackupSafe(statusItem)
+	} else {
+		log.Println("Une sauvegarde a déjà été effectuée aujourd'hui. Pas de rattrapage nécessaire.")
+	}
+}
+
+func sendNotification(success bool, title, message string) {
+	// Utilisation de l'icône par défaut de l'app si possible, sinon rien
+	iconPath := "" 
+	exePath, err := os.Executable()
+	if err == nil {
+		potentialIcon := filepath.Join(filepath.Dir(exePath), IconFilename)
+		if _, err := os.Stat(potentialIcon); err == nil {
+			iconPath = potentialIcon
+		}
+	}
 
 	notification := &toast.Notification{
-		AppID:   "Backup Assistant",
+		AppID:   "Assistant Backup Doctorat",
 		Title:   title,
 		Message: message,
+		Icon:    iconPath,
 		Actions: []toast.Action{
-			{Type: "protocol", Label: "Voir Logs", Arguments: "notepad " + absLog},
+			{Type: "protocol", Label: "Ouvrir Logs", Arguments: "cmd /c start \"\" \"" + paths.logFile + "\""},
 		},
 	}
 

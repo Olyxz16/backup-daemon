@@ -1,17 +1,17 @@
-name: Build and Release Windows Backup Assistant
+name: Build and Release MSI
 
 on:
   push:
     tags:
-      - 'v*' # Se déclenche quand on pousse un tag comme v1.0.0, v0.1.5, etc.
+      - 'v*' # Se déclenche sur les tags comme v1.0.0
 
 permissions:
-  contents: write # Nécessaire pour créer la release
+  contents: write
 
 jobs:
-  build-and-package:
-    name: Build Windows Binary
-    runs-on: windows-latest # Utilisation d'un runner Windows pour CGO facile
+  build-and-package-msi:
+    name: Build Windows MSI
+    runs-on: windows-2019 # Utiliser windows-2019 qui a des outils WiX stables
 
     steps:
       - name: Checkout code
@@ -20,54 +20,40 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21' # Ou ta version de Go
+          go-version: '1.21'
           cache: true
 
-      # Le runner Windows de GitHub a déjà MinGW (gcc) installé, 
-      # donc CGO devrait fonctionner directement.
-
-      - name: Build Binary
+      - name: Build Go Binary
         shell: pwsh
-        # -H=windowsgui : cache la console
-        # -s -w : réduit la taille du binaire en enlevant les infos de debug
+        # CGO est nécessaire. Le runner Windows l'a déjà.
+        # -H=windowsgui cache la console.
         run: |
-          go build -ldflags "-H=windowsgui -s -w" -o backup-daemon.exe main.go
+          go build -ldflags "-H=windowsgui -s -w" -o BackupAssistant.exe main.go
+          if (!(Test-Path "BackupAssistant.exe")) { throw "Go build failed" }
+          if (!(Test-Path "icon.ico")) { throw "icon.ico missing" }
 
-      - name: Verify Files Exist
-        shell: pwsh
-        run: |
-          if (!(Test-Path "backup-daemon.exe")) { throw "Exe missing!" }
-          if (!(Test-Path "icon.ico")) { throw "Icon missing! Make sure icon.ico is in root." }
-
-      - name: Create README for user
+      - name: Add WiX to PATH
         shell: pwsh
         run: |
-          $readmeContent = @"
-          === Assistant de Sauvegarde Doctorat ===
+            # WiX est préinstallé sur les images windows-2019 de GitHub Actions
+            # On ajoute le chemin des binaires WiX (candle.exe et light.exe) au PATH
+            echo "$env:WIX\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          INSTALLATION :
-          1. Créez un dossier où vous voulez (ex: C:\BackupTools).
-          2. Copiez les DEUX fichiers dans ce dossier :
-             - BackupAssistant.exe
-             - icon.ico
-          3. Pour lancer automatiquement au démarrage :
-             - Faites Touche Windows + R.
-             - Tapez : shell:startup
-             - Créez un raccourci de BackupAssistant.exe dans le dossier qui s'ouvre.
-
-          UTILISATION :
-          Une icône apparaît près de l'heure (en bas à droite).
-          Clic-droit pour voir le statut ou forcer une sauvegarde.
-          "@
-          Set-Content -Path README.txt -Value $readmeContent
-
-      - name: Create Zip Package
+      - name: Build MSI with WiX
         shell: pwsh
         run: |
-          Compress-Archive -Path backup-daemon.exe, icon.ico, README.txt -DestinationPath BackupAssistant_Windows.zip
+          # 1. Candle : Compile le fichier .wxs en objet .wixobj
+          # -arch x64 précise qu'on fait un installeur 64-bits (pour Program Files64)
+          candle.exe -arch x64 -codepage "65001" installer.wxs -o installer.wixobj
+          
+          # 2. Light : Lie l'objet pour créer le fichier .msi final
+          # -spdb supprime la génération de fichiers de debug .pdb inutiles
+          light.exe -spdb installer.wixobj -o AssistantBackupDoctorat_Setup.msi
+          
+          if (!(Test-Path "AssistantBackupDoctorat_Setup.msi")) { throw "MSI build failed" }
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: BackupAssistant_Windows.zip
-          generate_release_notes: true # Génère une description basée sur les commits
+          files: AssistantBackupDoctorat_Setup.msi
+          generate_release_notes: true
