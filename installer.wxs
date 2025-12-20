@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product Id="*" Name="Assistant Backup Doctorat" Language="1036" Codepage="65001" Version="1.0.0.0" Manufacturer="MonOrganisation" UpgradeCode="9ea932eb-4633-45f0-b073-781b1e21b092">
+        
+        <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" SummaryCodepage="1252"/>
+
+        <MajorUpgrade DowngradeErrorMessage="Une version plus récente est déjà installée." />
+        <MediaTemplate EmbedCab="yes" />
+
+        <Icon Id="icon.ico" SourceFile="icon.ico"/>
+        <Property Id="ARPPRODUCTICON" Value="icon.ico" />
+
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="ProgramFiles64Folder">
+                <Directory Id="INSTALLFOLDER" Name="AssistantBackupDoctorat" />
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="Assistant Backup Doctorat"/>
+            </Directory>
+            <Directory Id="StartupFolder" Name="Startup" />
+        </Directory>
+
+        <DirectoryRef Id="INSTALLFOLDER">
+            <Component Id="MainExecutable" Guid="*">
+                <File Id="BackupAppEXE" Source="BackupAssistant.exe" KeyPath="yes" Checksum="yes"/>
+            </Component>
+            <Component Id="AppIconFile" Guid="*">
+                <File Id="AppIconICO" Source="icon.ico" KeyPath="yes"/>
+            </Component>
+        </DirectoryRef>
+
+        <DirectoryRef Id="ApplicationProgramsFolder">
+             <Component Id="ApplicationShortcut" Guid="*">
+                <Shortcut Id="ApplicationStartMenuShortcut"
+                          Name="Assistant Backup Doctorat"
+                          Description="Lance l'assistant de sauvegarde en arrière-plan"
+                          Target="[INSTALLFOLDER]BackupAssistant.exe"
+                          WorkingDirectory="INSTALLFOLDER"
+                          Icon="icon.ico"/>
+                <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
+                <RegistryValue Root="HKCU" Key="Software\MyCompany\BackupAssistant" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+            </Component>
+        </DirectoryRef>
+
+        <DirectoryRef Id="StartupFolder">
+             <Component Id="StartupShortcutComponent" Guid="*">
+                <Shortcut Id="ApplicationStartupShortcut"
+                          Name="Assistant Backup Doctorat"
+                          Description="Démarrage automatique"
+                          Target="[INSTALLFOLDER]BackupAssistant.exe"
+                          WorkingDirectory="INSTALLFOLDER"
+                          Icon="icon.ico"/>
+                <RegistryValue Root="HKCU" Key="Software\MyCompany\BackupAssistantStartup" Name="startup_installed" Type="integer" Value="1" KeyPath="yes"/>
+            </Component>
+        </DirectoryRef>
+
+        <Feature Id="MainApplication" Title="Main Application" Level="1">
+            <ComponentRef Id="MainExecutable" />
+            <ComponentRef Id="AppIconFile" />
+            <ComponentRef Id="ApplicationShortcut" />
+            <ComponentRef Id="StartupShortcutComponent" />
+        </Feature>
+    </Product>
+</Wix>
