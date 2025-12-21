@@ -36,7 +36,9 @@
                           Description="Lance l'assistant de sauvegarde en arrière-plan"
                           Target="[INSTALLFOLDER]BackupAssistant.exe"
                           WorkingDirectory="INSTALLFOLDER"
-                          Icon="icon.ico"/>
+                          Icon="icon.ico">
+                    <ShortcutProperty Key="System.AppUserModel.ID" Value="Backup.Assistant.Doctorat"/>
+                </Shortcut>
                 <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
                 <RegistryValue Root="HKCU" Key="Software\MyCompany\BackupAssistant" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
             </Component>

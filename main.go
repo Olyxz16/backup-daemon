@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-toast/toast"
 	"github.com/getlantern/systray"
 	"github.com/robfig/cron/v3"
-	"gopkg.in/toast.v1"
 	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 )
@@ -301,7 +301,7 @@ func sendNotification(success bool, title, message string) {
 	}
 
 	notification := &toast.Notification{
-		AppID:   "Assistant Backup Doctorat",
+		AppID:   "Doctorat.Backup.Assistant",
 		Title:   title,
 		Message: message,
 		Icon:    iconPath,
