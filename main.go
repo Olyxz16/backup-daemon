@@ -305,10 +305,10 @@ func sendNotification(success bool, title, message string) {
 		Title:   title,
 		Message: message,
 		Icon:    iconPath,
-		Actions: []toast.Action{
-			{Type: "protocol", Label: "Ouvrir Logs", Arguments: "cmd /c start \"\" \"" + paths.logFile + "\""},
-		},
 	}
 
-	notification.Push()
+	err = notification.Push()
+	if err != nil {
+		log.Printf("Erreur lors de l'envoi de la notification : %w\n")
+	}
 }
