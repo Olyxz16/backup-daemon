@@ -44,9 +44,9 @@ jobs:
         run: |
           # La configuration d'encodage est maintenant DANS le fichier installer.wxs
           # On lance une commande simple.
-          candle.exe -arch x64 installer.wxs -o installer.wixobj
+          candle.exe -ext WixUtilExtension -arch x64 installer.wxs -o installer.wixobj
           
-          light.exe -spdb installer.wixobj -o AssistantBackupDoctorat_Setup.msi
+          light.exe -ext WixUtilExtension -spdb installer.wixobj -o AssistantBackupDoctorat_Setup.msi
           
           if (!(Test-Path "AssistantBackupDoctorat_Setup.msi")) { throw "MSI build failed" }
 
