@@ -42,16 +42,13 @@ jobs:
       - name: Build MSI with WiX
         shell: pwsh
         run: |
-          # 1. Candle : Compile le fichier .wxs en objet .wixobj
-          # -arch x64 précise qu'on fait un installeur 64-bits (pour Program Files64)
-          candle.exe -arch x64 -codepage:65001 installer.wxs -o installer.wixobj
-          
-          # 2. Light : Lie l'objet pour créer le fichier .msi final
-          # -spdb supprime la génération de fichiers de debug .pdb inutiles
-          light.exe -spdb installer.wixobj -o AssistantBackupDoctorat_Setup.msi
-          
-          if (!(Test-Path "AssistantBackupDoctorat_Setup.msi")) { throw "MSI build failed" }
+          if (!(Test-Path "installer.wxs")) { throw "installer.wxs introuvable dans $(Get-Location)" }
+          & "candle.exe" --% -arch x64 installer.wxs -o installer.wixobj
 
+          if (!(Test-Path "installer.wixobj")) { throw "La compilation WiX (candle) a échoué : installer.wixobj non généré." }
+          & "light.exe" --% -spdb installer.wixobj -o AssistantBackupDoctorat_Setup.msi
+
+          if (!(Test-Path "AssistantBackupDoctorat_Setup.msi")) { throw "La liaison WiX (light) a échoué : MSI non généré." }
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
