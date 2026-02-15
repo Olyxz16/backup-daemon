@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-    <Product Id="*" Name="Assistant Backup" Language="1036" CodePage="65001" Version="1.0.0.0" Manufacturer="Olyxz16" UpgradeCode="9ea932eb-4633-45f0-b073-781b1e21b092">
+    <Product Id="*" Name="Assistant Backup" Language="1036" Codepage="65001" Version="1.0.0.0" Manufacturer="Olyxz16" UpgradeCode="9ea932eb-4633-45f0-b073-781b1e21b092">
         <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine"/>
 
         <MajorUpgrade DowngradeErrorMessage="Une version plus récente est déjà installée." />
