@@ -44,7 +44,7 @@ jobs:
         run: |
           # 1. Candle : Compile le fichier .wxs en objet .wixobj
           # -arch x64 précise qu'on fait un installeur 64-bits (pour Program Files64)
-          candle.exe -arch x64 -codepage "65001" installer.wxs -o installer.wixobj
+          candle.exe -arch x64 -codepage:65001 installer.wxs -o installer.wixobj
           
           # 2. Light : Lie l'objet pour créer le fichier .msi final
           # -spdb supprime la génération de fichiers de debug .pdb inutiles
