@@ -1,2 +1,5 @@
 build:
-	go build -ldflags "-H=windowsgui" -o backup-daemon.exe main.go
+	go build -o backup-daemon .
+
+windows:
+	go build -ldflags "-H=windowsgui -s -w" -o BackupAssistant.exe .

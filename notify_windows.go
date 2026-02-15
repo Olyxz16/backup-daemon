@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -25,7 +27,7 @@ func sendNotification(success bool, title, message string) {
 		Message: message,
 		Icon:    iconPath,
 		Actions: []toast.Action{
-			{Type: "protocol", Label: "Ouvrir Logs", Arguments: "cmd /c start "" "" + paths.logFile + """},
+			{Type: "protocol", Label: "Ouvrir Logs", Arguments: "cmd /c start \"\" \"" + paths.logFile + "\""},
 		},
 	}
 
