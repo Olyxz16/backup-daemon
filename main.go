@@ -20,6 +20,7 @@ import (
 
 // --- STRUCTURE DE CONFIGURATION YAML ---
 type Config struct {
+	Repository	   string `yaml:"repository"`
 	ResticPassword string `yaml:"restic_password"`
 	SourcePath     string `yaml:"source_path"`
 	CronSchedule   string `yaml:"cron_schedule"` // Ex: "0 9 * * *"
@@ -194,6 +195,10 @@ cron_schedule: "0 9 * * *" # Format Cron: Minute Heure Jour Mois Semaine (ex: 9h
 		return fmt.Errorf("le mot de passe par défaut n'a pas été changé dans config.yaml")
 	}
 
+	if appConfig.Repository == "" {
+		return fmt.Errorf("repository est vide")
+	}
+
 	return nil
 }
 
@@ -239,7 +244,10 @@ func performBackup() bool {
 	cmd := exec.Command("restic", "backup", appConfig.SourcePath)
 	
 	// Injection du mot de passe depuis la config
-	cmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+appConfig.ResticPassword)
+	env := os.Environ()
+	env = append(env, "RESTIC_PASSWORD="+appConfig.ResticPassword)
+	env = append(env, "RESTIC_REPOSITORY="+appConfig.Repository)
+	cmd.Env = env
 	// Important pour Windows: cacher la fenêtre console du sous-processus
 	// cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
