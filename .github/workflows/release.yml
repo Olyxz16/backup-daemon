@@ -28,9 +28,9 @@ jobs:
         # CGO est nécessaire. Le runner Windows l'a déjà.
         # -H=windowsgui cache la console.
         run: |
-          go build -ldflags "-H=windowsgui -s -w" -o BackupAssistant.exe main.go
-          if (!(Test-Path "BackupAssistant.exe")) { throw "Go build failed" }
           if (!(Test-Path "icon.ico")) { throw "icon.ico missing" }
+          go build -ldflags "-H=windowsgui -s -w" -o BackupAssistant.exe .
+          if (!(Test-Path "BackupAssistant.exe")) { throw "Go build failed" }
 
       - name: Add WiX to PATH
         shell: pwsh
