@@ -26,7 +26,7 @@ func loadConfig() error {
 restic_password: "CHANGE_MOI_VITE"
 source_path: "C:\Users\User\Documents"
 cron_schedule: "0 9 * * *" # Format Cron: Minute Heure Jour Mois Semaine (ex: 9h00 tous les jours)
-ssh_args: "-o StrictHostKeyChecking=accept-new"
+ssh_args: "-o StrictHostKeyChecking=accept-new -o BatchMode=yes"
 `
 		err := ioutil.WriteFile(paths.configFile, []byte(template), 0644)
 		if err != nil {

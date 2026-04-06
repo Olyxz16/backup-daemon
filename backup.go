@@ -47,14 +47,7 @@ func (m *ResticManager) RunBackup(statusItem *systray.MenuItem) {
 func (m *ResticManager) performBackup() (bool, string) {
 	log.Println("Exécution de Restic...")
 
-	args := []string{"backup", m.Config.SourcePath}
-	if len(m.Config.ExtraArgs) > 0 {
-		args = append(args, m.Config.ExtraArgs...)
-	}
-
-	cmd := exec.Command("restic", args...)
-
-	// Environment variables
+	// 1. Prepare environment variables
 	env := os.Environ()
 	env = append(env, "RESTIC_PASSWORD="+m.Config.ResticPassword)
 	env = append(env, "RESTIC_REPOSITORY="+m.Config.Repository)
@@ -65,14 +58,44 @@ func (m *ResticManager) performBackup() (bool, string) {
 		if m.Config.SSHArgs != "" {
 			sshCmd = "ssh " + m.Config.SSHArgs
 		} else {
-			// Default to accept-new to avoid blocking on unknown host keys
-			// while still providing some security.
-			sshCmd = "ssh -o StrictHostKeyChecking=accept-new"
+			// Default to accept-new and BatchMode=yes to avoid blocking on unknown host keys
+			// and to force non-interactive mode.
+			sshCmd = "ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
 		}
 		log.Printf("Using SSH command: %s", sshCmd)
 		env = append(env, "RESTIC_SSH_COMMAND="+sshCmd)
 	}
 
+	// 2. Check if repository is initialized, if not, initialize it.
+	// We run 'restic snapshots' to check, it will fail if the repo isn't there.
+	log.Println("Vérification et initialisation du dépôt Restic...")
+	initCmd := exec.Command("restic", "snapshots")
+	initCmd.Env = env
+	initOutput, initErr := initCmd.CombinedOutput()
+
+	if initErr != nil {
+		log.Printf("Le dépôt n'est pas initialisé ou accessible. Tentative d'initialisation...\nOutput: %s\nError: %v", string(initOutput), initErr)
+		// Try to initialize the repository
+		initRepoCmd := exec.Command("restic", "init")
+		initRepoCmd.Env = env
+		initRepoOutput, initRepoErr := initRepoCmd.CombinedOutput()
+		if initRepoErr != nil {
+			log.Printf("Erreur fatale lors de l'initialisation du dépôt Restic: %v\nOutput: %s", initRepoErr, string(initRepoOutput))
+			sendNotification(false, "ECHEC INIT DÉPÔT", "Impossible d'initialiser le dépôt Restic. Vérifiez les logs.")
+			return false, string(initRepoOutput)
+		}
+		log.Println("Dépôt Restic initialisé avec succès.")
+	} else {
+		log.Println("Dépôt Restic déjà initialisé et accessible.")
+	}
+
+	// 3. Perform the backup
+	args := []string{"backup", m.Config.SourcePath}
+	if len(m.Config.ExtraArgs) > 0 {
+		args = append(args, m.Config.ExtraArgs...)
+	}
+
+	cmd := exec.Command("restic", args...)
 	cmd.Env = env
 
 	// Capture output

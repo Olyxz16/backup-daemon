@@ -2,4 +2,4 @@ build:
 	go build -o backup-daemon .
 
 windows:
-	go build -ldflags "-H=windowsgui -s -w" -o BackupAssistant.exe .
+	GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui -s -w" -o BackupAssistant.exe .
